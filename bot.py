@@ -1,116 +1,97 @@
-#(©)Codexbotz
+# (©)Codexbotz
+# Recode by @mrismanaziz
+# t.me/SharingUserbot & t.me/Lunatic0de
 
-import base64
-import re
-import asyncio
-from pyrogram import filters, Client, enums
-from pyrogram.enums import ChatMemberStatus
-from config import FORCE_SUB_CHANNEL, FORCE_SUB_CHANNEL2, ADMINS
-from pyrogram.types import Message
-from pyrogram.errors.exceptions.bad_request_400 import UserNotParticipant
-from database.join_reqs import JoinReqs
-from pyrogram.errors import FloodWait
+import pyromod.listen
+import sys
 
-from logging import getLogger
+from pyrogram import Client
+from pyrogram.types import ChatJoinRequest
 
-db = JoinReqs
+from config import (
+    API_HASH,
+    APP_ID,
+    CHANNEL_ID,
+    FORCE_SUB_CHANNEL,
+    LOGGER,
+    TG_BOT_TOKEN,
+    TG_BOT_WORKERS,
+)
 
-async def is_subscribed(filter, client, update):
-    if FORCE_SUB_CHANNEL and db().isActive():
+
+class Bot(Client):
+    def __init__(self):
+        super().__init__(
+            "Bot",
+            api_hash=API_HASH,
+            api_id=APP_ID,
+            plugins={"root": "plugins"},
+            workers=TG_BOT_WORKERS,
+            bot_token=TG_BOT_TOKEN,
+        )
+        self.LOGGER = LOGGER
+
+    async def start(self):
         try:
-            # Check if User is Requested to Join Channel
-            user = await db().get_user(update.from_user.id)
-            if user and user["user_id"] == update.from_user.id:
-                return True
+            await super().start()
+            usr_bot_me = await self.get_me()
+            self.username = usr_bot_me.username
+            self.namebot = usr_bot_me.first_name
+            self.LOGGER(__name__).info(
+                f"TG_BOT_TOKEN detected!\n┌ First Name: {self.namebot}\n└ Username: @{self.username}\n——"
+            )
+        except Exception as a:
+            self.LOGGER(__name__).warning(a)
+            self.LOGGER(__name__).info(
+                "Bot Berhenti."
+            )
+            sys.exit()
+
+        if FORCE_SUB_CHANNEL:
+            try:
+                info = await self.get_chat(FORCE_SUB_CHANNEL)
+                link = info.invite_link
+                if not link:
+                    await self.create_chat_invite_link(FORCE_SUB_CHANNEL, creates_join_request=True)
+                    link = info.invite_link
+                    link = info.invite_link
+                self.invitelink = link
+                self.LOGGER(__name__).info(
+                    f"FORCE_SUB_CHANNEL detected!\n┌ Title: {info.title}\n└ Chat ID: {info.id}\n——"
+                )
+            except Exception as a:
+                self.LOGGER(__name__).warning(a)
+                self.LOGGER(__name__).warning(
+                    "Bot tidak dapat Mengambil link invite dari FORCE_SUB_CHANNEL!"
+                )
+                self.LOGGER(__name__).warning(
+                    f"Pastikan @{self.username} adalah admin di Channel Tersebut, Chat ID F-Subs Channel Saat Ini: {FORCE_SUB_CHANNEL}"
+                )
+                self.LOGGER(__name__).info(
+                    "Bot Berhenti."
+                )
+                sys.exit()
+
+        try:
+            db_channel = await self.get_chat(CHANNEL_ID)
+            self.db_channel = db_channel
+            test = await self.send_message(chat_id=db_channel.id, text="Test Message", disable_notification=True)
+            await test.delete()
+            self.LOGGER(__name__).info(
+                f"CHANNEL_ID Database detected!\n┌ Title: {db_channel.title}\n└ Chat ID: {db_channel.id}\n——"
+            )
         except Exception as e:
-            logger.exception(e, exc_info=True)
-            await update.reply(
-                text="Something went Wrong.",
-                parse_mode=enums.ParseMode.MARKDOWN,
-                disable_web_page_preview=True
+            self.LOGGER(__name__).warning(e)
+            self.LOGGER(__name__).warning(
+                f"Pastikan @{self.username} adalah admin di Channel DataBase anda, CHANNEL_ID Saat Ini: {CHANNEL_ID}"
             )
-            return False
-           
-async def encode(string):
-    string_bytes = string.encode("ascii")
-    base64_bytes = base64.urlsafe_b64encode(string_bytes)
-    base64_string = (base64_bytes.decode("ascii")).strip("=")
-    return base64_string
-
-async def decode(base64_string):
-    base64_string = base64_string.strip("=") # links generated before this commit will be having = sign, hence striping them to handle padding errors.
-    base64_bytes = (base64_string + "=" * (-len(base64_string) % 4)).encode("ascii")
-    string_bytes = base64.urlsafe_b64decode(base64_bytes) 
-    string = string_bytes.decode("ascii")
-    return string
-
-async def get_messages(client, message_ids):
-    messages = []
-    total_messages = 0
-    while total_messages != len(message_ids):
-        temb_ids = message_ids[total_messages:total_messages+200]
-        try:
-            msgs = await client.get_messages(
-                chat_id=client.db_channel.id,
-                message_ids=temb_ids
+            self.LOGGER(__name__).info(
+                "Bot Berhenti."
             )
-        except FloodWait as e:
-            await asyncio.sleep(e.x)
-            msgs = await client.get_messages(
-                chat_id=client.db_channel.id,
-                message_ids=temb_ids
-            )
-        except:
-            pass
-        total_messages += len(temb_ids)
-        messages.extend(msgs)
-    return messages
+            sys.exit()
 
-async def get_message_id(client, message):
-    if message.forward_from_chat:
-        if message.forward_from_chat.id == client.db_channel.id:
-            return message.forward_from_message_id
-        else:
-            return 0
-    elif message.forward_sender_name:
-        return 0
-    elif message.text:
-        pattern = "https://t.me/(?:c/)?(.*)/(\d+)"
-        matches = re.match(pattern,message.text)
-        if not matches:
-            return 0
-        channel_id = matches.group(1)
-        msg_id = int(matches.group(2))
-        if channel_id.isdigit():
-            if f"-100{channel_id}" == str(client.db_channel.id):
-                return msg_id
-        else:
-            if channel_id == client.db_channel.username:
-                return msg_id
-    else:
-        return 0
+    async def stop(self, *args):
+        await super().stop()
+        self.LOGGER(__name__).info("Bot stopped.")
 
-
-def get_readable_time(seconds: int) -> str:
-    count = 0
-    up_time = ""
-    time_list = []
-    time_suffix_list = ["s", "m", "h", "days"]
-    while count < 4:
-        count += 1
-        remainder, result = divmod(seconds, 60) if count < 3 else divmod(seconds, 24)
-        if seconds == 0 and remainder == 0:
-            break
-        time_list.append(int(result))
-        seconds = int(remainder)
-    hmm = len(time_list)
-    for x in range(hmm):
-        time_list[x] = str(time_list[x]) + time_suffix_list[x]
-    if len(time_list) == 4:
-        up_time += f"{time_list.pop()}, "
-    time_list.reverse()
-    up_time += ":".join(time_list)
-    return up_time
-  
-subscribed = filters.create(is_subscribed)
-    
+            
