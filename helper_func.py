@@ -3,34 +3,28 @@
 import base64
 import re
 import asyncio
-from pyrogram import filters, Client, enums
+from pyrogram import filters
 from pyrogram.enums import ChatMemberStatus
 from config import FORCE_SUB_CHANNEL, ADMINS
-from pyrogram.types import Message
 from pyrogram.errors.exceptions.bad_request_400 import UserNotParticipant
-from database.join_reqs import JoinReqs
 from pyrogram.errors import FloodWait
 
-from logging import getLogger
-
-db = JoinReqs
-
 async def is_subscribed(filter, client, update):
-    if FORCE_SUB_CHANNEL and db().isActive():
-        try:
-            # Check if User is Requested to Join Channel
-            user = await db().get_user(update.from_user.id)
-            if user and user["user_id"] == update.from_user.id:
-                return True
-        except Exception as e:
-            logger.exception(e, exc_info=True)
-            await update.reply(
-                text="Something went Wrong.",
-                parse_mode=enums.ParseMode.MARKDOWN,
-                disable_web_page_preview=True
-            )
-            return False
-           
+    if not FORCE_SUB_CHANNEL:
+        return True
+    user_id = update.from_user.id
+    if user_id in ADMINS:
+        return True
+    try:
+        member = await client.get_chat_member(chat_id = FORCE_SUB_CHANNEL, user_id = user_id)
+    except UserNotParticipant:
+        return False
+
+    if not member.status in [ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.MEMBER]:
+        return False
+    else:
+        return True
+
 async def encode(string):
     string_bytes = string.encode("ascii")
     base64_bytes = base64.urlsafe_b64encode(string_bytes)
@@ -111,7 +105,6 @@ def get_readable_time(seconds: int) -> str:
     time_list.reverse()
     up_time += ":".join(time_list)
     return up_time
-  
-subscribed = filters.create(is_subscribed)
 
-    
+
+subscribed = filters.create(is_subscribed)
